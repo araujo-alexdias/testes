@@ -1,0 +1,243 @@
+*----------------------------------------------------------------------*
+*                      BUNGE Global GTM Project                        *
+*----------------------------------------------------------------------*
+* Program name         : YTRGL_CREDIT_CONTRACT                         *
+* Description          : Compromisso de Crédito de Contrato            *
+*                                                                      *
+* Related FDS          : BBR_AGRI_ABA_098_(E)                          *
+* Functional           : Cleide Matos                                  *
+* Developer            : Igor Malfara / CT012277                       *
+* Creation Date        : 08/01/2016                                    *
+*----------------------------------------------------------------------*
+REPORT  ytrgl_credit_contract MESSAGE-ID ytrgl_cred_vendors.
+**----------------------------------------------------------------------*
+*INCLUDE:
+**----------------------------------------------------------------------*
+*
+**----------------------------------------------------------------------*
+*TABLES:
+**----------------------------------------------------------------------*
+TABLES: but000, wbhp.
+**----------------------------------------------------------------------*
+*TYPE-POOLS:
+**----------------------------------------------------------------------*
+TYPE-POOLS: vrm,
+            slis.
+**----------------------------------------------------------------------*
+*TYPES:
+**----------------------------------------------------------------------*
+TYPES:
+  BEGIN OF ty_ctogtm,
+    elifn        TYPE elifn,
+    tkonn        TYPE tkonn,
+    vkorg        TYPE wbhk-vkorg,
+    company_code TYPE wbhk-company_code,
+    moeda        TYPE char3,
+    partner1     TYPE bu_partner,
+btbsta       TYPE btbsta,       "INC3143901_Erro Compromisso AGRI - 21.02.2024 - CT023922.
+END OF ty_ctogtm,
+
+BEGIN OF ty_wbhf,
+tkonn_to TYPE wbhf-tkonn_to,
+END OF ty_wbhf,
+
+BEGIN OF ty_wbhp,
+tkonn    TYPE wbhp-tkonn,
+parvw    TYPE wbhp-parvw,
+lifnr    TYPE wbhp-lifnr,
+partner1 TYPE bu_partner, "parceiro de credito, verificado por but050 e knb1
+END OF ty_wbhp,
+
+BEGIN OF ty_but050,
+partner1 TYPE but050-partner1,
+partner2 TYPE but050-partner2,
+reltyp   TYPE but050-reltyp,
+dftval   TYPE but050-dftval,
+END OF ty_but050,
+
+BEGIN OF ty_knb1,
+bukrs TYPE knb1-bukrs,
+kunnr TYPE knb1-kunnr,
+knrze TYPE knb1-knrze,
+END OF ty_knb1,
+
+BEGIN OF ty_wbhd,
+tkonn       TYPE wbhd-tkonn,
+tposn       TYPE wbhd-tposn,
+yy_recompra TYPE wbhd-yy_recompra,
+END OF ty_wbhd.
+
+**----------------------------------------------------------------------*
+*CONSTANTS:
+**----------------------------------------------------------------------*
+CONSTANTS: gc_i      TYPE char1 VALUE 'I',
+           gc_e      TYPE char1 VALUE 'E',
+           gc_exit   TYPE sy-ucomm VALUE 'EXIT',
+           gc_cancel TYPE sy-ucomm VALUE 'CANCEL',
+           gc_back   TYPE sy-ucomm VALUE 'BACK'.
+**----------------------------------------------------------------------*
+** DATA:
+**----------------------------------------------------------------------*
+DATA:
+  gt_ctogtm        TYPE TABLE OF ty_ctogtm,
+  gt_wbhi          TYPE TABLE OF wbhi,
+  gt_wbhp          TYPE TABLE OF ty_wbhp,
+  gt_but050        TYPE TABLE OF ty_but050,
+  gt_knb1          TYPE TABLE OF ty_knb1,
+  gt_cred_vend     TYPE ytrgl_cred_vend_tt,
+  gt_saldo_coml_in TYPE yctgl_bal_coml_in_tab,
+  gt_saldo_coml    TYPE ytrgl_saldo_coml_t,
+  gt_ctro_saldo    TYPE ytrgl_cred_ctro_saldo_com_t,
+  gt_wbhd          TYPE TABLE OF ty_wbhd,
+  gt_tctyp         TYPE RANGE OF tctyp,
+  gt_btbsta        TYPE RANGE OF btbsta,
+  gt_vkorg         TYPE RANGE OF wbhk-vkorg,
+  gt_company_code  TYPE RANGE OF wbhk-company_code,
+* Begin - Ajuste  - 8000008536 - 06 Julho 2022
+  gt_zfbdt         TYPE RANGE OF ytrgl_pay_posit-zfbdt,
+* End - Ajuste  - 8000008536 - 06 Julho 2022
+  ok_code          LIKE sy-ucomm.
+
+**----------------------------------------------------------------------*
+*FIELD-SYMBOLS:
+**----------------------------------------------------------------------*
+FIELD-SYMBOLS:
+  <fs_ctogtm>        TYPE ty_ctogtm,
+  <fs_saldo_coml>    TYPE LINE OF ytrgl_saldo_coml_t,
+  <fs_saldo_coml_in> TYPE LINE OF yctgl_bal_coml_in_tab.
+**----------------------------------------------------------------------*
+*RANGES:
+**----------------------------------------------------------------------*
+*
+**----------------------------------------------------------------------*
+*INITIALIZATION.
+**----------------------------------------------------------------------*
+*
+**----------------------------------------------------------------------*
+** SELECTION SCREEN Definition
+**----------------------------------------------------------------------*
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE text-t01.
+SELECT-OPTIONS: s_partne    FOR but000-partner,
+                s_part1     FOR but000-partner,
+                s_tkonn     FOR wbhp-tkonn.
+* Begin - Ajuste  - 8000008536 - 06 Julho 2022
+PARAMETERS p_pg_rec AS CHECKBOX USER-COMMAND pgrec.
+* End - Ajuste  - 8000008536 - 06 Julho 2022
+SELECTION-SCREEN END OF BLOCK b1.
+
+* Begin - Ajuste  - 8000008536 - 06 Julho 2022
+AT SELECTION-SCREEN OUTPUT.
+  PERFORM disable_fields.
+* End - Ajuste  - 8000008536 - 06 Julho 2022
+
+**----------------------------------------------------------------------*
+*AT SELECTION-SCREEN ON s_bukrs.
+
+**----------------------------------------------------------------------*
+*AT SELECTION-SCREEN
+**----------------------------------------------------------------------*
+AT SELECTION-SCREEN.
+
+**----------------------------------------------------------------------*
+*AT SELECTION-SCREEN
+**----------------------------------------------------------------------*
+START-OF-SELECTION.
+** Verifica autorização
+*  PERFORM authority_check.
+* Limpa dados
+  PERFORM refresh_data USING abap_true.
+* Seleciona informações da tabela de constantes.
+  PERFORM search_global_data.
+* Begin - Ajuste  - 8000008536 - 06 Julho 2022
+  IF p_pg_rec IS NOT INITIAL.
+*   Seleciona pagto. recente.
+    PERFORM search_latest_payment.
+  ENDIF.
+* End - Ajuste  - 8000008536 - 06 Julho 2022
+* Seleciona informações do Contrato de GTM para Processamento.
+  PERFORM search_gtm_contract.
+* Definir o parceiro de credito
+  PERFORM define_credit_owner.
+* Definir o segmento de crédito
+  PERFORM define_credit_segment.
+  IF gt_ctro_saldo[] IS NOT INITIAL.
+*   Atualizar compromisso de crédito
+    PERFORM update_commitment.
+  ENDIF.
+**----------------------------------------------------------------------*
+*END-OF-SELECTION.
+**----------------------------------------------------------------------*
+END-OF-SELECTION.
+* Limpa dados
+  PERFORM refresh_data USING abap_false.
+* Mostra resultado do relatório em ALV.
+  PERFORM display_alv.
+**----------------------------------------------------------------------*
+*AT SELECTION-SCREEN.
+**----------------------------------------------------------------------*
+
+**----------------------------------------------------------------------*
+*AT PFn.
+**----------------------------------------------------------------------*
+*
+**----------------------------------------------------------------------*
+*AT USER-COMMAND.
+**----------------------------------------------------------------------*
+*
+**----------------------------------------------------------------------*
+*TOP-OF-PAGE.
+**----------------------------------------------------------------------*
+*
+**----------------------------------------------------------------------*
+*END-OF-PAGE.
+**----------------------------------------------------------------------*
+*
+**----------------------------------------------------------------------*
+*EINCLUDE
+**----------------------------------------------------------------------*
+  INCLUDE ytrgl_credit_contract_o01.
+  INCLUDE ytrgl_credit_contract_i01.
+**----------------------------------------------------------------------*
+**                               Forms                                  *
+**----------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+*&      Form  zf_sel_dados_globais
+*&---------------------------------------------------------------------*
+*       Seleciona informações da tabela de constantes.
+*----------------------------------------------------------------------*
+FORM search_global_data .
+  DATA:   ls_parametro    TYPE ztbtec_parametro,
+          ls_tctyp        LIKE LINE OF gt_tctyp,
+          ls_btbsta       LIKE LINE OF gt_btbsta,
+          ls_vkorg        LIKE LINE OF gt_vkorg,
+          ls_company_code LIKE LINE OF gt_company_code,
+          lt_parametro    TYPE TABLE OF ztbtec_parametro.
+CONSTANTS: lc_report         TYPE zdetec_programa   VALUE 'YTRGL_CREDIT_CONTRACT',
+lc_tctyp          TYPE zdetec_parametro  VALUE 'WBHK-TCTYP',
+lc_btbsta         TYPE zdetec_parametro  VALUE 'WBHK-BTBSTA_2',
+lc_vkorg          TYPE zdetec_parametro  VALUE 'WBHK-VKORG',
+lc_company_code   TYPE zdetec_parametro  VALUE 'WBHK-COMPANY_CODE',
+lc_dias_pagamento TYPE zdetec_parametro  VALUE 'YTRGL_PAY_POSIT',
+lc_between        TYPE char2             VALUE 'BT',
+lc_frente         TYPE zdetec_frente     VALUE 'CTR',
+lc_equal          TYPE char2             VALUE 'EQ'.
+
+  CLEAR: lt_parametro[], gt_tctyp[], ls_tctyp.
+  CALL FUNCTION 'ZFTEC_PARAMETROS'
+    EXPORTING
+      i_programa       = lc_report
+      i_parametro      = lc_tctyp
+      i_frente         = lc_frente
+    TABLES
+      ztbtec_parametro = lt_parametro
+    EXCEPTIONS
+      not_found        = 1
+      OTHERS           = 2.
+  IF sy-subrc IS INITIAL.
+    LOOP AT lt_parametro INTO ls_parametro.
+      ls_tctyp-sign    = gc_i.
+      ls_tctyp-option  = lc_equal.
+      ls_tctyp-low     = ls_parametro-valor.
+      APPEND ls_tctyp TO gt_tctyp.
+    ENDLOOP.
+  ENDIF.
